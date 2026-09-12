@@ -1,0 +1,55 @@
+name: Recalculate workbook
+
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: "Workbook to recalculate"
+        required: false
+        default: "SLS.xlsx"
+
+permissions:
+  contents: write
+
+jobs:
+  recalc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LibreOffice
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libreoffice-calc
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install openpyxl
+        run: pip install openpyxl
+
+      - name: Recalculate and check for formula errors
+        id: recalc
+        run: |
+          python3 .github/scripts/recalc_ci.py "${{ inputs.file || 'SLS.xlsx' }}" 120 | tee recalc_result.json
+
+      - name: Upload recalc result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recalc-result
+          path: recalc_result.json
+
+      - name: Commit recalculated workbook
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- "${{ inputs.file || 'SLS.xlsx' }}"; then
+            git add "${{ inputs.file || 'SLS.xlsx' }}"
+            git commit -m "chore: recalculate formulas via LibreOffice [skip ci]"
+            git push
+          else
+            echo "No changes after recalculation."
+          fi
